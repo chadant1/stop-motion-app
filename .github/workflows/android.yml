@@ -1,0 +1,61 @@
+name: Build Android app (APK)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Copy the web app into a native wrapper
+        run: |
+          mkdir -p native/www
+          cp -r index.html manifest.webmanifest sw.js css js icons native/www/
+
+      - name: Create the Capacitor Android project
+        working-directory: native
+        run: |
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npx cap init Frameloom com.chadant1.frameloom --web-dir www
+          npx cap add android
+          npx cap sync android
+
+      - name: Add camera and microphone permissions
+        working-directory: native/android
+        run: |
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />#' app/src/main/AndroidManifest.xml
+          grep -n "permission\|uses-feature" app/src/main/AndroidManifest.xml
+
+      - name: Use the Frameloom icon
+        run: |
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            for f in ic_launcher.png ic_launcher_round.png ic_launcher_foreground.png; do
+              t=native/android/app/src/main/res/mipmap-$d/$f
+              [ -f "$t" ] && cp icons/icon-192.png "$t" || true
+            done
+          done
+
+      - name: Build APK
+        working-directory: native/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Frameloom-android
+          path: native/android/app/build/outputs/apk/debug/app-debug.apk
